@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 # Define text colors
 RED='\033[0;31m'
@@ -9,32 +9,16 @@ BOLD='\033[1m'
 MAGENTA='\033[35m'
 RESET='\033[0m'
 
-DEVDOTS_DIR="$(pwd)"
+set -euo pipefail
+
+SUDO="sudo"
+[ "$EUID" -eq 0 ] && SUDO=""
+
+DEVDOTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if running on Arch Linux
 is_arch() {
-    if ! grep -qi '^ID=arch' /etc/os-release; then
-        return 1
-    fi
-}
-
-# Check if yay is installed
-check_yay() {
-  if ! command -v yay &> /dev/null; then
-      return 1
-  else
-      echo -e "${GREEN}${BOLD}Yay is already installed.${RESET}"
-  fi
-}
-
-# Check last command status
-check_status() {
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}${BOLD}Success: $1${RESET}"
-    else
-        echo -e "${RED}${BOLD}Error: ${RESET}$2"
-        exit 1
-    fi
+    grep -qi '^ID=arch' /etc/os-release || grep -qi '^ID_LIKE=.*arch' /etc/os-release
 }
 
 # Backup file if it exists
@@ -45,7 +29,6 @@ backup_file() {
     local backup="${file}.backup.$(date +%Y%m%d_%H%M%S)"
     echo -e "${YELLOW}${BOLD}Backing up ${file} to ${backup}.${RESET}"
     mv "$file" "$backup"
-    check_status "Backup completed" "Backup failed"
 }
 
 # Clone git repository safely
@@ -64,7 +47,6 @@ safe_clone() {
     fi
 
     git clone "$repo" "$dir"
-    check_status "Cloned $repo successfully" "Cloning failed"
 }
 
 # Copy directory safely
@@ -90,7 +72,6 @@ safe_copy() {
     fi
 
     cp -r "$src" "$dest"
-    check_status "Copied $src to $dest" "Copy failed"
 }
 
 # Introduction
@@ -120,61 +101,49 @@ if [[ ! $choice =~ ^[Yy](es)?$ ]]; then
     exit 1
 fi
 
-# Check and install yay
-if ! check_yay; then
-    echo -e "${CYAN}${BOLD}Installing yay...${RESET}"
-    sudo pacman -S --needed git base-devel
-    safe_clone https://aur.archlinux.org/yay.git $HOME/yay
-    cd $HOME/yay
-    makepkg -si
-    cd $HOME
-    check_status "yay installed" "Failed to install yay"
-fi
-
 # Install Zsh plugins
 ZSH_PLUGIN_DIR="$HOME/.local/share/zsh-plugins"
 mkdir -p "$ZSH_PLUGIN_DIR"
 echo -e "${GREEN}${BOLD}Cloning Zsh plugins...${RESET}"
 
-safe_clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_PLUGIN_DIR/zsh-syntax-highlighting"
-safe_clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_PLUGIN_DIR/zsh-autosuggestions"
-safe_clone https://github.com/zap-zsh/supercharge.git "$ZSH_PLUGIN_DIR/supercharge"
-
-# Install and configure Zsh
-echo -e "${GREEN}${BOLD}Installing Zsh...${RESET}"
-yay -S --noconfirm zsh
-check_status "Zsh installed" "Failed to install Zsh"
-chsh -s /bin/zsh
-backup_file "$HOME/.zshrc"
-touch "$HOME/.zshrc"
-
 # Define packages
 packages=(
-  kitty
-  nvim
-  lsd
-  zsh
-  starship
+    git
+    kitty
+    nvim
+    lsd
+    zsh
+    starship
 )
 
 # Install packages
 echo -e "${CYAN}${BOLD}Installing packages...${RESET}"
 for package in "${packages[@]}"; do 
-  echo -e "$package"
+  echo "$package"
 done
 
-yay -S --noconfirm "${packages[@]}"
-check_status "Packages installed" "Package installation failed"
+$SUDO pacman -Syu --noconfirm
+$SUDO pacman -S --needed "${packages[@]}"
+
+mkdir -p "$HOME/.config"
 
 # Copy dotfiles
-for dir in $DEVDOTS_DIR/config/*; do
+for dir in "$DEVDOTS_DIR"/config/*; do
     if [[ -d "$dir" ]]; then
         echo "$dir"
         safe_copy "$dir" "$HOME/.config"
     fi
 done
 
+# zsh plugins
+safe_clone https://github.com/zsh-users/zsh-syntax-highlighting.git "$ZSH_PLUGIN_DIR/zsh-syntax-highlighting"
+safe_clone https://github.com/zsh-users/zsh-autosuggestions.git "$ZSH_PLUGIN_DIR/zsh-autosuggestions"
+safe_clone https://github.com/zap-zsh/supercharge.git "$ZSH_PLUGIN_DIR/supercharge"
+
+chsh -s "$(command -v zsh)" || echo -e "${YELLOW}Could not change shell automatically.${RESET}"
+backup_file "$HOME/.zshrc"
 safe_copy "$DEVDOTS_DIR/config/.zshrc" "$HOME"
 
-echo -e "${GREEN}Setup complete.${RESET}"          
+echo -e "${GREEN}Setup complete!${RESET}"          
+echo -e "${CYAN}Run 'exec zsh' to switch zsh immediately.${RESET}"          
 exit 0
